@@ -1,0 +1,59 @@
+# === Source Dataset ===
+source: "laion-aesthetic"
+num_samples: 10000
+min_aesthetic_score: 6.0
+
+# === Filtering ===
+min_resolution: 256
+max_aspect_ratio: 2.0
+nsfw_threshold: 0.3
+dedup_hash_size: 16
+dedup_hamming_threshold: 6
+
+# === Captioning ===
+caption_model: "Salesforce/blip2-opt-2.7b"
+caption_model_fallback: "Salesforce/blip-image-captioning-large"
+caption_model_dtype: "float16"
+caption_max_tokens: 50
+caption_batch_size: 8
+caption_checkpoint_interval: 500
+
+# === CLIP Text Encoding ===
+clip_model: "openai/clip-vit-large-patch14"
+clip_max_length: 77
+
+# === Clustering ===
+embedding_model: "facebook/dinov2-base"
+embedding_batch_size: 64
+num_clusters: 8
+kmeans_n_init: 20
+kmeans_max_iter: 500
+cluster_imbalance_warn_threshold: 0.05
+
+# === VAE Encoding ===
+vae_model: "stabilityai/sd-vae-ft-mse"
+vae_batch_size: 32
+vae_scaling_factor: 0.18215
+
+# === Sharding ===
+shard_size: 1000
+output_format: "webdataset"
+
+# === Paths (local) ===
+raw_data_dir: "data/raw"
+filtered_data_dir: "data/filtered"
+captioned_data_dir: "data/captioned"
+clustered_data_dir: "data/clustered"
+latent_data_dir: "data/latents"
+output_dir: "outputs"
+checkpoint_dir: "checkpoints"
+analysis_dir: "analysis"
+
+# === Object Storage (production — uncomment for S3/GCS) ===
+# storage_backend: "s3"
+# s3_bucket: "bagel-data-pipeline"
+# s3_prefix: "v1.0.0"
+
+# === Reproducibility ===
+random_seed: 42
+log_level: "INFO"
