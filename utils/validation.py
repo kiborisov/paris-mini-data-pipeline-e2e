@@ -1,4 +1,5 @@
 """Inter-stage validation to catch silent data corruption early."""
+from __future__ import annotations
 
 import logging
 from pathlib import Path
@@ -87,6 +88,14 @@ def _validate_ingest(config: dict):
     if parquet_path.exists():
         df = pd.read_parquet(parquet_path)
         _check_min_rows(df, 1, "ingest")
+        if "aesthetic_score" in df.columns:
+            scores = pd.to_numeric(df["aesthetic_score"], errors="coerce")
+            if scores.notnull().any():
+                if (scores <= 0).all() and config.get("min_aesthetic_score", 0) > 0:
+                    raise ValidationError(
+                        "[ingest] aesthetic_score is 0 for all rows. "
+                        "Check LAION column mapping in Stage 1."
+                    )
         logger.info(f"[ingest] {len(df)} images downloaded")
     else:
         # img2dataset may use different output structure — check for any content

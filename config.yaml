@@ -3,12 +3,28 @@ source: "laion-aesthetic"
 num_samples: 10000
 min_aesthetic_score: 6.0
 
+# === Ingest ===
+laion_index_dataset: "laion/laion2B-en-aesthetic"
+laion_index_split: "train"
+laion_index_streaming: false
+laion_index_max_rows: 200000
+ingest_oversample_factor: 1.4
+ingest_progress_interval: 50
+img2dataset_processes: 4
+img2dataset_thread_count: 16
+img2dataset_timeout: 10
+img2dataset_retries: 1
+hf_stream_max_retries: 8
+hf_stream_retry_limit: 10
+hf_stream_retry_backoff: 5
+
 # === Filtering ===
 min_resolution: 256
 max_aspect_ratio: 2.0
 nsfw_threshold: 0.3
 dedup_hash_size: 16
 dedup_hamming_threshold: 6
+dedup_bucket_bits: 12
 
 # === Captioning ===
 caption_model: "Salesforce/blip2-opt-2.7b"

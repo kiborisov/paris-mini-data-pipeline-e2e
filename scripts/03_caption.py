@@ -6,12 +6,14 @@ Produces two outputs:
 
 GPU required.
 """
+from __future__ import annotations
 
 import logging
 from pathlib import Path
 
 import numpy as np
 import torch
+from PIL import Image
 from tqdm import tqdm
 
 from utils.helpers import (
@@ -93,7 +95,7 @@ def _caption_images(
             try:
                 images.append(load_image(p))
             except Exception:
-                images.append(load_image(batch_paths[0]))  # placeholder
+                images.append(Image.new("RGB", (256, 256)))  # neutral placeholder
 
         inputs = processor(images=images, return_tensors="pt").to(device, torch.float16)
 

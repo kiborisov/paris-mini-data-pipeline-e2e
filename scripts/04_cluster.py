@@ -6,6 +6,7 @@ L2-normalization before K-means.
 
 GPU required.
 """
+from __future__ import annotations
 
 import logging
 from pathlib import Path

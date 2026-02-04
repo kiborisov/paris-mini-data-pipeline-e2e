@@ -8,6 +8,7 @@ Produces two output sets:
 
 No GPU required.
 """
+from __future__ import annotations
 
 import hashlib
 import json

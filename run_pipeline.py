@@ -8,6 +8,7 @@ Usage:
     python run_pipeline.py --dry-run              # Validate config without executing
     python run_pipeline.py --config custom.yaml   # Use custom config file
 """
+from __future__ import annotations
 
 import argparse
 import importlib

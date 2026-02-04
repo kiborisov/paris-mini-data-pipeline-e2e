@@ -6,9 +6,10 @@ Phase 2: Perceptual deduplication using pHash.
 
 GPU required for NSFW detection only.
 """
+from __future__ import annotations
 
 import logging
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import imagehash
@@ -155,49 +156,82 @@ def _apply_quality_filters(df: pd.DataFrame, config: dict) -> tuple[pd.DataFrame
 # ---------------------------------------------------------------------------
 
 def _deduplicate(df: pd.DataFrame, config: dict) -> tuple[pd.DataFrame, int]:
-    """Remove near-duplicate images using perceptual hashing."""
+    """Remove near-duplicate images using perceptual hashing.
+
+    Buckets hashes by leading bits to avoid full O(n^2) comparisons.
+    """
     hash_size = config.get("dedup_hash_size", 16)
     threshold = config.get("dedup_hamming_threshold", 6)
+    bucket_bits = config.get("dedup_bucket_bits", 12)
 
-    logger.info(f"Computing perceptual hashes (hash_size={hash_size})...")
+    logger.info(
+        "Computing perceptual hashes (hash_size=%d, bucket_bits=%d)...",
+        hash_size,
+        bucket_bits,
+    )
 
     hashes = []
+    hash_ints = []
     for _, row in df.iterrows():
         try:
             h = imagehash.phash(Image.open(row["image_path"]), hash_size=hash_size)
             hashes.append(h)
+            hash_ints.append(int(str(h), 16))
         except Exception:
             hashes.append(None)
+            hash_ints.append(None)
 
-    # Find duplicates: for each pair within hamming distance, keep the one
-    # with higher aesthetic score
+    hash_bits = hash_size * hash_size
+    bucket_bits = min(bucket_bits, hash_bits)
+    shift = max(hash_bits - bucket_bits, 0)
+
+    buckets: dict[int, list[int]] = defaultdict(list)
+    for idx, h_int in enumerate(hash_ints):
+        if h_int is None:
+            continue
+        bucket_key = h_int >> shift if shift else h_int
+        buckets[bucket_key].append(idx)
+
     df = df.copy()
     df["_phash"] = hashes
     df["_is_dup"] = False
 
-    # Simple O(n^2) dedup — fine for 10k, would use LSH at scale
-    hash_list = df["_phash"].tolist()
     aesthetic_list = df["aesthetic_score"].tolist()
     is_dup = [False] * len(df)
 
-    for i in range(len(hash_list)):
-        if is_dup[i] or hash_list[i] is None:
+    for bucket_idx, indices in buckets.items():
+        if len(indices) <= 1:
             continue
-        for j in range(i + 1, len(hash_list)):
-            if is_dup[j] or hash_list[j] is None:
+        for pos_i in range(len(indices)):
+            i = indices[pos_i]
+            if is_dup[i]:
                 continue
-            if hash_list[i] - hash_list[j] <= threshold:
-                # Keep the one with higher aesthetic score
-                if aesthetic_list[i] >= aesthetic_list[j]:
-                    is_dup[j] = True
-                else:
-                    is_dup[i] = True
-                    break
+            hash_i = df["_phash"].iat[i]
+            if hash_i is None:
+                continue
+            for pos_j in range(pos_i + 1, len(indices)):
+                j = indices[pos_j]
+                if is_dup[j]:
+                    continue
+                hash_j = df["_phash"].iat[j]
+                if hash_j is None:
+                    continue
+                if hash_i - hash_j <= threshold:
+                    if aesthetic_list[i] >= aesthetic_list[j]:
+                        is_dup[j] = True
+                    else:
+                        is_dup[i] = True
+                        break
 
     n_dups = sum(is_dup)
     df_deduped = df[~pd.Series(is_dup)].drop(columns=["_phash", "_is_dup"]).reset_index(drop=True)
 
-    logger.info(f"Deduplication: removed {n_dups} near-duplicates, {len(df_deduped)} remaining")
+    logger.info(
+        "Deduplication: removed %d near-duplicates, %d remaining (buckets=%d)",
+        n_dups,
+        len(df_deduped),
+        len(buckets),
+    )
 
     return df_deduped, n_dups
 

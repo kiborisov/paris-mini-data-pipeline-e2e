@@ -1,4 +1,5 @@
 """Shared utilities: config loading, checkpointing, image I/O, seed management."""
+from __future__ import annotations
 
 import hashlib
 import json
