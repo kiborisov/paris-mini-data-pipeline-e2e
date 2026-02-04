@@ -6,7 +6,7 @@ Paris trains 8 independent DiT-XL/2 diffusion experts (605M params each) on sema
 
 ## Intro
 
-I came across the Paris paper (arXiv 2510.03434) from Bagel Labs while reading about decentralized training approaches. The core idea is straightforward. You take 8 independent DiT-XL/2 diffusion experts at 605M parameters each, train them on semantically clustered partitions of the data with zero inter-node communication, then route between them at inference time using a lightweight DiT-B router around 129M params.
+I came across the Paris paper (arXiv 2510.03434) from Bagel Labs while reading about decentralized training approaches. The core idea is unique. You take 8 independent DiT-XL/2 diffusion experts at 605M parameters each, train them on semantically clustered partitions of the data with zero inter-node communication, then route between them at inference time using a lightweight DiT-B router around 129M params.
 
 What caught my attention was the data side. Paris clusters its training set using DINOv2 embeddings and conditions generation on CLIP ViT-L/14 text embeddings, with images encoded to 32x32x4 latents through Stability AI's sd-vae-ft-mse VAE. The whole thing falls apart if the clustering is bad or the preprocessing is sloppy. Eight experts are only as good as the eight partitions they train on. I wanted to understand what that data pipeline actually looks like end to end, how you go from raw LAION images to clean, clustered, VAE-encoded shards that are ready for distributed training.
 
