@@ -54,6 +54,7 @@ vae_scaling_factor: 0.18215
 # === Sharding ===
 shard_size: 1000
 output_format: "webdataset"
+clean_expert_shards: true
 
 # === Paths (local) ===
 raw_data_dir: "data/raw"
@@ -65,7 +66,7 @@ output_dir: "outputs"
 checkpoint_dir: "checkpoints"
 analysis_dir: "analysis"
 
-# === Object Storage (production — uncomment for S3/GCS) ===
+# === Object Storage (production - uncomment for S3/GCS) ===
 # storage_backend: "s3"
 # s3_bucket: "bagel-data-pipeline"
 # s3_prefix: "v1.0.0"

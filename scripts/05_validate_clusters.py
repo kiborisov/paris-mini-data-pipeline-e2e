@@ -1,6 +1,6 @@
 """Stage 5: Quantitative and visual cluster validation.
 
-Produces the evidence that the pipeline works — silhouette scores,
+Produces the evidence that the pipeline works - silhouette scores,
 Davies-Bouldin index, per-cluster coherence metrics, and visual sample grids.
 
 No GPU required.

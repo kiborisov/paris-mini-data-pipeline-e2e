@@ -132,7 +132,7 @@ def _get_laion_subset_batch(config: dict, output_path: str):
 
     logger.info("Dataset columns: %s", list(df_all.columns))
 
-    # Normalize column names — LAION uses uppercase, find whichever exists
+    # Normalize column names - LAION uses uppercase, find whichever exists
     url_col = next((c for c in df_all.columns if c.lower() in ("url",)), None)
     caption_col = next((c for c in df_all.columns if c.lower() in ("text", "caption", "description")), None)
     aesthetic_col = next(
@@ -154,7 +154,7 @@ def _get_laion_subset_batch(config: dict, output_path: str):
     if url_col is None:
         raise RuntimeError(f"No URL column found in dataset. Columns: {list(df_all.columns)}")
 
-    logger.info("Detected columns — url: %s, caption: %s, aesthetic: %s", url_col, caption_col, aesthetic_col)
+    logger.info("Detected columns - url: %s, caption: %s, aesthetic: %s", url_col, caption_col, aesthetic_col)
 
     # Filter by aesthetic score
     if aesthetic_col:
@@ -162,7 +162,7 @@ def _get_laion_subset_batch(config: dict, output_path: str):
         df_filtered = df_all[df_all[aesthetic_col] >= min_aesthetic_score]
     else:
         # laion2B-en-aesthetic is already aesthetic-filtered, so all rows qualify
-        logger.info("No aesthetic score column — dataset is pre-filtered, using all rows.")
+        logger.info("No aesthetic score column - dataset is pre-filtered, using all rows.")
         df_filtered = df_all
 
     logger.info("After aesthetic filter: %d / %d rows", len(df_filtered), len(df_all))
@@ -178,7 +178,7 @@ def _get_laion_subset_batch(config: dict, output_path: str):
         )
 
     # Build output with standardized column names
-    # img2dataset reserves "caption" — so we store the text column as "caption"
+    # img2dataset reserves "caption" - so we store the text column as "caption"
     # which img2dataset auto-uses, and only list non-reserved cols in save_additional_columns
     if aesthetic_col:
         aesthetic_values = df_filtered[aesthetic_col].fillna(min_aesthetic_score).values

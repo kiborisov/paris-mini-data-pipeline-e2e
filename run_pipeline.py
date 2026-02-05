@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pipeline orchestrator — single entry point for all stages.
+"""Pipeline orchestrator - single entry point for all stages.
 
 Usage:
     python run_pipeline.py                        # Run full pipeline
@@ -37,7 +37,7 @@ STAGES = {
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Paris data pipeline — LAION to expert training shards"
+        description="Paris data pipeline - LAION to expert training shards"
     )
     parser.add_argument(
         "--config",
@@ -119,7 +119,7 @@ def main():
     logger.info("=" * 60)
 
     if args.dry_run:
-        logger.info("DRY RUN — validating config and stage dependencies only")
+        logger.info("DRY RUN - validating config and stage dependencies only")
         for num in stage_nums:
             stage_name, module_path = STAGES[num]
             logger.info(f"  Stage {num}: {stage_name} ({module_path})")

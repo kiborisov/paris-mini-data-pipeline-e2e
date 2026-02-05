@@ -98,7 +98,7 @@ def _validate_ingest(config: dict):
                     )
         logger.info(f"[ingest] {len(df)} images downloaded")
     else:
-        # img2dataset may use different output structure — check for any content
+        # img2dataset may use different output structure - check for any content
         files = list(raw_dir.rglob("*"))
         if not files:
             raise ValidationError("[ingest] Raw data directory is empty")
@@ -159,7 +159,7 @@ def _validate_cluster(config: dict):
         if frac < threshold:
             logger.warning(
                 f"[cluster] Cluster {cid} has only {frac:.1%} of data "
-                f"({count} images) — below {threshold:.0%} threshold"
+                f"({count} images) - below {threshold:.0%} threshold"
             )
 
     logger.info(f"[cluster] {len(df)} images across {n_clusters} clusters")

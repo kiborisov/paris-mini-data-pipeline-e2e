@@ -53,7 +53,7 @@ def _load_caption_model(config: dict):
 
     except (RuntimeError, torch.cuda.OutOfMemoryError):
         fallback = config.get("caption_model_fallback", "Salesforce/blip-image-captioning-large")
-        logger.warning(f"BLIP-2 OOM — falling back to {fallback}")
+        logger.warning(f"BLIP-2 OOM - falling back to {fallback}")
 
         from transformers import BlipForConditionalGeneration, BlipProcessor
 

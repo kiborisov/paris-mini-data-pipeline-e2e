@@ -1,10 +1,13 @@
-"""Stage 7: Package into WebDataset shards and router training data.
+"""Stage 7: Package into WebDataset shards and router training assets.
 
 Produces two output sets:
-1. Expert training shards: per-cluster .tar files containing VAE latents,
+1. Expert training shards: per-cluster `.tar` files containing VAE latents,
    CLIP text embeddings, captions, and metadata.
-2. Router training data: (DINOv2 embedding, cluster_label) pairs for the
-   full dataset.
+2. Router training assets:
+   - `latents.npy`: clean VAE latents (the router adds noise/timesteps during training)
+   - `cluster_labels.npy`: cluster assignments
+   - `dinov2_embeddings.npy` (optional): DINOv2 embeddings used to derive the clusters
+   - `clip_text_embeddings.npy` (optional): CLIP text embeddings
 
 No GPU required.
 """
@@ -26,12 +29,21 @@ from utils.helpers import load_metadata, sha256_file
 logger = logging.getLogger(__name__)
 
 
+def _safe_torch_load(path: Path):
+    # `weights_only` exists on newer PyTorch; fall back for older installs.
+    try:
+        return torch.load(path, map_location="cpu", weights_only=True)
+    except TypeError:
+        return torch.load(path, map_location="cpu")
+
+
 def _build_expert_shards(df: pd.DataFrame, config: dict):
     """Create per-cluster WebDataset .tar shards."""
     output_dir = Path(config["output_dir"]) / "expert_shards"
     latent_dir = Path(config["latent_data_dir"])
     caption_dir = Path(config["captioned_data_dir"])
     shard_size = config["shard_size"]
+    clean_existing = bool(config.get("clean_expert_shards", True))
 
     # Load CLIP embeddings
     clip_emb_path = caption_dir / "clip_text_embeddings.npy"
@@ -50,6 +62,11 @@ def _build_expert_shards(df: pd.DataFrame, config: dict):
         cluster_dir = output_dir / f"cluster_{cluster_id}"
         cluster_dir.mkdir(parents=True, exist_ok=True)
 
+        if clean_existing:
+            # Avoid mixing old/new shards when the cluster's shard count changes.
+            for p in cluster_dir.glob("*.tar"):
+                p.unlink()
+
         pattern = str(cluster_dir / "shard-%04d.tar")
 
         with wds.ShardWriter(pattern, maxcount=shard_size) as sink:
@@ -62,11 +79,9 @@ def _build_expert_shards(df: pd.DataFrame, config: dict):
                     logger.warning(f"Missing latent for {image_id}, skipping")
                     continue
 
-                latent = torch.load(latent_path, weights_only=True)
+                latent = _safe_torch_load(latent_path)
 
-                # Get CLIP embedding by original index
-                orig_idx = row.name if "orig_idx" in df.columns else None
-                # We need to find the index in the captioned metadata
+                # Find the index in the captioned metadata (stable across shuffling).
                 clip_idx = _find_clip_index(row["image_path"], config)
                 if clip_idx is not None and clip_idx < len(clip_embeddings):
                     clip_emb = clip_embeddings[clip_idx]
@@ -83,7 +98,6 @@ def _build_expert_shards(df: pd.DataFrame, config: dict):
 
                 # Write to shard
                 import io
-                import pickle
 
                 latent_buf = io.BytesIO()
                 torch.save(latent, latent_buf)
@@ -130,19 +144,53 @@ def _find_clip_index(image_path: str, config: dict) -> int | None:
 
 
 def _build_router_training_data(config: dict):
-    """Package router training data: embeddings + cluster labels."""
+    """Package router training assets."""
     output_dir = Path(config["output_dir"]) / "router_training"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     clustered_dir = Path(config["clustered_data_dir"])
+    latent_dir = Path(config["latent_data_dir"])
 
-    # Copy embeddings and cluster labels
-    embeddings = np.load(str(clustered_dir / "embeddings.npy"))
     df = load_metadata(str(clustered_dir / "metadata.parquet"))
     cluster_labels = df["cluster_id"].values.astype(np.int32)
 
-    np.save(str(output_dir / "embeddings.npy"), embeddings)
+    # 1) Save labels (+ ids for reproducibility)
+    image_ids = df["image_path"].map(lambda p: Path(p).stem).astype(str).values
     np.save(str(output_dir / "cluster_labels.npy"), cluster_labels)
+    np.save(str(output_dir / "image_ids.npy"), image_ids)
+
+    # 2) Save clean latents in the same order as labels.
+    # The Paris router trains on noisy latents x_t at timestep t; the training loop adds noise.
+    latents = np.empty((len(df), 4, 32, 32), dtype=np.float16)
+    missing = 0
+    first_missing = None
+    for i, image_id in enumerate(image_ids):
+        latent_path = latent_dir / f"{image_id}.pt"
+        if not latent_path.exists():
+            missing += 1
+            if first_missing is None:
+                first_missing = str(latent_path)
+            continue
+        latent = _safe_torch_load(latent_path)
+        # Expect (4, 32, 32). If a batch dim exists, drop it.
+        if isinstance(latent, torch.Tensor) and latent.ndim == 4 and latent.shape[0] == 1:
+            latent = latent[0]
+        if not isinstance(latent, torch.Tensor) or tuple(latent.shape) != (4, 32, 32):
+            raise RuntimeError(f"Unexpected latent shape for {image_id}: {getattr(latent, 'shape', None)}")
+        latents[i] = latent.detach().cpu().to(dtype=torch.float16).numpy()
+
+    if missing:
+        raise RuntimeError(
+            f"Missing {missing} latent files while building router assets. First missing: {first_missing}"
+        )
+
+    np.save(str(output_dir / "latents.npy"), latents)
+
+    # 3) Save DINOv2 embeddings used for clustering (optional but useful for analysis).
+    emb_path = clustered_dir / "embeddings.npy"
+    if emb_path.exists():
+        dinov2_embeddings = np.load(str(emb_path))
+        np.save(str(output_dir / "dinov2_embeddings.npy"), dinov2_embeddings)
 
     # Copy CLIP text embeddings if available
     clip_path = Path(config["captioned_data_dir"]) / "clip_text_embeddings.npy"
@@ -151,8 +199,10 @@ def _build_router_training_data(config: dict):
         np.save(str(output_dir / "clip_text_embeddings.npy"), clip_emb)
 
     logger.info(
-        f"Router training data: {len(embeddings)} samples, "
-        f"embeddings {embeddings.shape}, labels {cluster_labels.shape}"
+        "Router assets: %d samples (latents %s, labels %s).",
+        len(df),
+        latents.shape,
+        cluster_labels.shape,
     )
 
 
