@@ -156,7 +156,7 @@ This is how I originally caught leftover shards from run #1 that weren't reflect
 
 **What breaks first at 11M**: sklearn K-means. 11M × 1024 float32 is about 43 GB of embeddings (assuming DINOv2-ViT-L/14 like the paper), and that is before you do anything useful with them. Use faiss.
 
-## Intersting findings / thoughts
+## Interesting findings / thoughts
 
 Building this pipeline forced me to separate two concerns: the practical mechanics of preparing data for distributed expert training, and the broader research question of whether zero-communication training is a viable paradigm for diffusion models.
 
