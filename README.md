@@ -1,20 +1,20 @@
-# Paris Data Pipeline — LAION to Expert Training Shards
+# Paris Data Pipeline - LAION to Expert Training Shards
 
 A data pipeline that reproduces the data preparation strategy behind [Bagel Labs' Paris model](https://arxiv.org/abs/2510.03434) at demo scale.
 
-Paris trains 8 independent diffusion experts in complete isolation — no gradient sync, no parameter sharing — on semantically clustered data. The paper validates at two scales: DiT-B/2 (129M params per expert, 1.03B total) and DiT-XL/2 (605M per expert, 4.84B total). This pipeline produces everything needed to train both the experts and the post-hoc router: VAE latents, CLIP text embeddings, DINOv2-clustered partitions, and router supervision data.
+Paris trains 8 independent diffusion experts in complete isolation (no gradient sync, no parameter sharing) on semantically clustered data. The paper validates at two scales: DiT-B/2 (129M params per expert, 1.03B total) and DiT-XL/2 (605M per expert, 4.84B total). This pipeline produces everything needed to train both the experts and the post-hoc router: VAE latents, CLIP text embeddings, DINOv2-clustered partitions, and router supervision data.
 
 ## Intro
 
-I came across the Paris paper (arXiv:2510.03434) from Bagel Labs while reading about decentralized training approaches. The core idea is straightforward: take 8 independent DiT-XL/2 diffusion experts at 605M parameters each, train them on semantically clustered partitions of the data with zero inter-node communication, then route between them at inference time using a lightweight DiT-B router around 129M params.
+I came across the Paris paper (arXiv:2510.03434) from Bagel Labs while reading about decentralized training approaches. The core idea is straightforward: take 8 independent diffusion experts (validated at DiT-B/2 and DiT-XL/2), train them on semantically clustered partitions with zero inter-node communication, then route between them at inference time with a lightweight DiT-B/2 router.
 
-What caught my attention more than the model architecture was the data side. Paris clusters its training set using DINOv2 embeddings and conditions generation on CLIP ViT-L/14 text embeddings, with images encoded to 32x32x4 latents through Stability AI's sd-vae-ft-mse VAE. The whole thing falls apart if the clustering is bad or the preprocessing is sloppy — eight experts are only as good as the eight partitions they train on. I wanted to understand what that data pipeline actually looks like end to end, how you go from raw LAION images to clean, clustered, VAE-encoded shards ready for distributed training.
+What caught my attention more than the model architecture was the data side. Paris clusters its training set using DINOv2 embeddings and conditions generation on CLIP ViT-L/14 text embeddings, with images encoded to 32x32x4 latents through Stability AI's sd-vae-ft-mse VAE. The whole thing falls apart if the clustering is bad or the preprocessing is sloppy - eight experts are only as good as the eight partitions they train on. I wanted to understand what that data pipeline actually looks like end to end, how you go from raw LAION images to clean, clustered, VAE-encoded shards ready for distributed training.
 
-So I built one. Not at Paris scale (11M images from LAION-Aesthetic required 120 A40 GPU-days and proper orchestration), but at 10k images on a Kaggle T4 x2 instance, enough to validate every stage and hit real edge cases. The pipeline has 7 stages: ingest from LAION-Aesthetic on Hugging Face, quality filtering with NSFW detection and pHash perceptual deduplication, captioning with BLIP-2 plus CLIP ViT-L/14 text embedding extraction, DINOv2-base visual embedding followed by K-means clustering into 8 partitions, cluster validation with silhouette score and Davies-Bouldin index, VAE latent encoding to 32x32x4 float16 tensors, and finally packaging everything into per-cluster WebDataset tar shards with router training pairs.
+So I built one. Not at Paris scale (11M images from LAION-Aesthetic required 120 A40 GPU-days and proper orchestration), but at 10k images on a Kaggle T4 x2 instance, enough to validate every stage and hit real edge cases. The pipeline has 7 stages: ingest from `laion/laion2B-en-aesthetic` on Hugging Face (proxy for the paper's LAION-Aesthetic subset), quality filtering with NSFW detection and pHash perceptual deduplication, captioning with BLIP-2 plus CLIP ViT-L/14 text embedding extraction, DINOv2-base visual embedding followed by K-means clustering into 8 partitions, cluster validation with silhouette score and Davies-Bouldin index, VAE latent encoding to 32x32x4 float16 tensors, and finally packaging everything into per-cluster WebDataset tar shards with router training pairs.
 
 Out of 10,000 requested images, 9,096 came back (904 dead URLs), and 8,994 survived filtering (53 flagged NSFW, 49 perceptual duplicates removed). The 8 clusters landed on recognizable semantic groupings: cars and vehicles (645 samples), dresses and fashion (544), paintings and fine art (544), illustrations and clipart (548), food and beverages (1,143), general photography as a catch-all (3,746), crafts and decorative objects (1,370), and cakes and confections (454). Silhouette score came out at 0.0425 and Davies-Bouldin at 5.0757, which is expected at this scale with the catch-all cluster absorbing 41.6% of the data. The tighter clusters showed intra-cluster cosine similarity between 0.17 and 0.30, which indicates meaningful semantic separation. The final output is 13 WebDataset shards totaling about 1.1 GB of latents, CLIP embeddings, BLIP-2 captions, and metadata, plus numpy arrays for router training. The whole run took about 38 minutes wall time.
 
-A few places where this pipeline intentionally deviates from the paper: Paris uses DINOv2-ViT-L/14 (1024-d features) for semantic clustering (paper Section 2.6); I use DINOv2-base (768-d) as a compute tradeoff at demo scale — switch to ViT-L/14 if you want to match the paper more closely. Paris conditions on CLIP embeddings of existing LAION alt-text; I add a BLIP-2 re-captioning step (Salesforce/blip2-opt-2.7b) before CLIP encoding because LAION alt-text is noisy. And Paris uses a two-stage hierarchical clustering strategy (fine-grained k-means followed by consolidation into K=8 coarse clusters); I do single-pass K-means(K=8) here as a simplification.
+A few places where this pipeline intentionally deviates from the paper. Paris uses DINOv2-ViT-L/14 (1024-d features) for semantic clustering (paper Section 2.6). I use DINOv2-base (768-d) as a compute tradeoff at demo scale. If you switch to ViT-L/14, you also need to update `utils/validation.py` to expect 1024-d embeddings instead of 768-d. Paris conditions on CLIP embeddings of existing LAION alt-text. I add a BLIP-2 re-captioning step (Salesforce/blip2-opt-2.7b) before CLIP encoding because LAION alt-text is noisy. Paris also uses a two-stage hierarchical clustering strategy (fine-grained k-means followed by consolidation into K=8 coarse clusters). I do single-pass K-means(K=8) here as a simplification.
 
 ## Pipeline
 
@@ -149,9 +149,9 @@ This is how I originally caught leftover shards from run #1 that weren't reflect
 
 | Concern | 10k (demo) | 11M (Paris scale) |
 |---------|-----------|-------------------|
-| Clustering | sklearn K-means in-memory | faiss GPU K-means (billion-scale) |
+| Clustering | sklearn K-means in-memory | faiss GPU K-means |
 | Captioning | BLIP-2 is the slow part | If you keep re-captioning, this dominates. Paris does not require this step. |
-| Storage | ~6 GB local (raw + intermediates + shards) | ~1.9 TB S3, stream via WebDataset |
+| Storage | ~6 GB local (raw + intermediates + shards) | ~1-2 TB on object storage (rough estimate), stream via WebDataset |
 | Orchestration | `run_pipeline.py` | Prefect/Airflow DAG |
 
 **What breaks first at 11M**: sklearn K-means. 11M × 1024 float32 is about 43 GB of embeddings (assuming DINOv2-ViT-L/14 like the paper), and that is before you do anything useful with them. Use faiss.
@@ -164,7 +164,7 @@ It was not a clean run on the first try.
 
 **Aesthetic score metadata gap.** The aesthetic score column was missing from the initial metadata pull, which meant every shard came out with aesthetic 0.00 across the board. I fixed that by pulling the column through properly and re-running.
 
-**Leftover shards from previous runs.** After the re-run, I noticed 4 out of 17 total shard files on disk still had zeroed aesthetic scores. These were leftover shards from the first run that still carried the old metadata — they had full data (latents, embeddings, captions), just zeroed aesthetic scores. At the time, the sharding script (`07_shard.py`) didn't clean previous `.tar` outputs before writing new ones, so the 4 leftover files coexisted with the 13 correct shards from run #2. The shard viewer's health checks are what caught this. I fixed this by making Stage 7 clean existing shard outputs by default (`clean_expert_shards: true`). There is also a possibility that some LAION records simply don't have aesthetic scores attached; to close the loop I'd either compute aesthetic scores using LAION's predictor or re-run with stricter metadata validation.
+**Leftover shards from previous runs.** After the re-run, I noticed 4 out of 17 total shard files on disk still had zeroed aesthetic scores. These were leftover shards from the first run that still carried the old metadata. They had full data (latents, embeddings, captions), just zeroed aesthetic scores. At the time, the sharding script (`07_shard.py`) didn't clean previous `.tar` outputs before writing new ones, so the 4 leftover files coexisted with the 13 correct shards from run #2. The shard viewer's health checks are what caught this. I fixed this by making Stage 7 clean existing shard outputs by default (`clean_expert_shards: true`). There is also a possibility that some LAION records simply don't have aesthetic scores attached; to close the loop I'd either compute aesthetic scores using LAION's predictor or re-run with stricter metadata validation.
 
 **Shard viewer as a debugging tool.** The FastAPI + React viewer (above) started as a quick debugging tool but ended up being the fastest way to audit data quality without writing throwaway scripts. It caught the leftover shard issue and made it easy to spot patterns in the cluster assignments.
 
@@ -192,8 +192,8 @@ The whole point was to get hands on with the data engineering behind decentraliz
 
 ## References
 
-- [Paris: A Decentralized Trained Open-Weight Diffusion Model](https://arxiv.org/abs/2510.03434) — Bagel Labs
+- [Paris: A Decentralized Trained Open-Weight Diffusion Model](https://arxiv.org/abs/2510.03434) - Bagel Labs
 - [LAION-Aesthetic](https://laion.ai/blog/laion-aesthetics/)
-- [DINOv2](https://arxiv.org/abs/2304.07193) — Meta AI
-- [sd-vae-ft-mse](https://huggingface.co/stabilityai/sd-vae-ft-mse) — Stability AI
-- [CLIP ViT-L/14](https://github.com/openai/CLIP) — OpenAI
+- [DINOv2](https://arxiv.org/abs/2304.07193) - Meta AI
+- [sd-vae-ft-mse](https://huggingface.co/stabilityai/sd-vae-ft-mse) - Stability AI
+- [CLIP ViT-L/14](https://github.com/openai/CLIP) - OpenAI
