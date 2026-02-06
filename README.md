@@ -6,9 +6,9 @@ Paris trains 8 independent diffusion experts in complete isolation (no gradient 
 
 ## Intro
 
-I came across the Paris paper (arXiv:2510.03434) from Bagel Labs while reading about decentralized training approaches. What caught my attention was the data side: Paris clusters its training set using DINOv2 embeddings and conditions generation on CLIP ViT-L/14 text embeddings, with images encoded to 32x32x4 latents. The whole thing falls apart if the clustering is bad or the preprocessing is sloppy - eight experts are only as good as the eight partitions they train on.
+I came across the Paris paper (arXiv:2510.03434) from Bagel Labs while reading about decentralized training approaches. What caught my attention was the data side: Paris clusters its training set using DINOv2 embeddings and conditions generation on CLIP ViT-L/14 text embeddings, with images encoded to 32x32x4 latents. In this architecture, data quality and clustering are load-bearing. Eight experts are only as good as the eight partitions they train on. I wanted to understand what that data pipeline actually looks like end-to-end.
 
-So I built a pipeline to understand that end-to-end. Not at Paris scale (11M images, 120 A40 GPU-days), but at 10k images on a Kaggle T4 x2 instance - enough to validate every stage and hit real edge cases. The pipeline covers ingest, quality filtering, BLIP-2 captioning, CLIP/DINOv2 embedding, K-means clustering, VAE encoding, and WebDataset sharding. See Results for metrics.
+So I built one. Not at Paris scale (11M images, 120 A40 GPU-days), but at 10k images on a Kaggle T4 x2 instance - enough to validate every stage and hit real edge cases. The pipeline covers ingest, quality filtering, BLIP-2 captioning, CLIP/DINOv2 embedding, K-means clustering, VAE encoding, and WebDataset sharding. See Results for metrics.
 
 ### Deviations from Paper
 
@@ -166,7 +166,7 @@ Building this pipeline forced me to separate two concerns: the practical mechani
 
 **If communication disappears, clustering becomes the contract.** In this architecture, the "coordination" shows up entirely in the partitioning step: good clusters create experts with clean specialties; bad clusters strand capacity in the wrong shard, and the router cannot compensate after the fact. Building this pipeline gave me direct experience with that constraint.
 
-### Engineering Reality Check (What Actually Broke)
+### Implementation Notes
 
 **Connection reliability.** Streaming directly from LAION kept dropping connections, so I switched to downloading 200k rows upfront and sampling from there, which made the ingest stage reliable.
 
