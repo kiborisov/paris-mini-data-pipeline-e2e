@@ -142,7 +142,7 @@ I built a shard viewer tool (FastAPI + React) to browse the pipeline outputs int
 - **Paginated browsing** with images streamed directly from raw files (fallback to shards)
 - **Entry detail modal** with larger preview, captions, scores, and source URL
 
-This is how I originally caught leftover shards from run #1 that weren't reflected in the manifest (see "What I Learned" below). I later fixed this by making Stage 7 clean existing shard outputs by default.
+This is how I originally caught leftover shards from run #1 that weren't reflected in the manifest (see "Implementation Notes" below). I later fixed this by making Stage 7 clean existing shard outputs by default.
 
 ![Shard viewer overview](assets/shard_viewer_overview.png)
 ![Shard viewer entries](assets/shard_viewer_entries.png)
