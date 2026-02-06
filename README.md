@@ -6,15 +6,17 @@ Paris trains 8 independent diffusion experts in complete isolation (no gradient 
 
 ## Intro
 
-I came across the Paris paper (arXiv:2510.03434) from Bagel Labs while reading about decentralized training approaches. The core idea is straightforward: take 8 independent diffusion experts (validated at DiT-B/2 and DiT-XL/2), train them on semantically clustered partitions with zero inter-node communication, then route between them at inference time with a lightweight DiT-B/2 router.
+I came across the Paris paper (arXiv:2510.03434) from Bagel Labs while reading about decentralized training approaches. What caught my attention was the data side: Paris clusters its training set using DINOv2 embeddings and conditions generation on CLIP ViT-L/14 text embeddings, with images encoded to 32x32x4 latents. The whole thing falls apart if the clustering is bad or the preprocessing is sloppy - eight experts are only as good as the eight partitions they train on.
 
-What caught my attention was the data side. Paris clusters its training set using DINOv2 embeddings and conditions generation on CLIP ViT-L/14 text embeddings, with images encoded to 32x32x4 latents through Stability AI's sd-vae-ft-mse VAE. Eight experts are only as good as the eight partitions they train on. I wanted to understand what that data pipeline actually looks like end to end, how you go from raw LAION images to clean, clustered, VAE-encoded shards ready for distributed training.
+So I built a pipeline to understand that end-to-end. Not at Paris scale (11M images, 120 A40 GPU-days), but at 10k images on a Kaggle T4 x2 instance - enough to validate every stage and hit real edge cases. The pipeline covers ingest, quality filtering, BLIP-2 captioning, CLIP/DINOv2 embedding, K-means clustering, VAE encoding, and WebDataset sharding. See Results for metrics.
 
-So I built one. Not at Paris scale (11M images from LAION-Aesthetic required 120 A40 GPU-days and proper orchestration), but at 10k images on a Kaggle T4 x2 instance, enough to validate every stage and hit real edge cases. The pipeline has 7 stages: ingest from `laion/laion2B-en-aesthetic` on Hugging Face (proxy for the paper's LAION-Aesthetic subset), quality filtering with NSFW detection and pHash perceptual deduplication, captioning with BLIP-2 plus CLIP ViT-L/14 text embedding extraction, DINOv2-base visual embedding followed by K-means clustering into 8 partitions, cluster validation with silhouette score and Davies-Bouldin index, VAE latent encoding to 32x32x4 float16 tensors, and finally packaging everything into per-cluster WebDataset tar shards with router training pairs.
+### Deviations from Paper
 
-Out of 10,000 requested images, 9,096 came back (904 dead URLs), and 8,994 survived filtering (53 flagged NSFW, 49 perceptual duplicates removed). The 8 clusters landed on recognizable semantic groupings: cars and vehicles (645 samples), dresses and fashion (544), paintings and fine art (544), illustrations and clipart (548), food and beverages (1,143), general photography as a catch-all (3,746), crafts and decorative objects (1,370), and cakes and confections (454). Silhouette score came out at 0.0425 and Davies-Bouldin at 5.0757, which is expected at this scale with the catch-all cluster absorbing 41.6% of the data. The tighter clusters showed intra-cluster cosine similarity between 0.17 and 0.30, which indicates meaningful semantic separation. The final output is 13 WebDataset shards totaling about 1.1 GB of latents, CLIP embeddings, BLIP-2 captions, and metadata, plus numpy arrays for router training. The whole run took about 38 minutes wall time.
-
-A few places where this pipeline intentionally deviates from the paper. Paris uses DINOv2-ViT-L/14 (1024-d features) for semantic clustering (paper Section 2.6). I use DINOv2-base (768-d) as a compute tradeoff at demo scale. If you switch to ViT-L/14, you also need to update `utils/validation.py` to expect 1024-d embeddings instead of 768-d. Paris conditions on CLIP embeddings of existing LAION alt-text. I add a BLIP-2 re-captioning step (Salesforce/blip2-opt-2.7b) before CLIP encoding because LAION alt-text is noisy. Paris also uses a two-stage hierarchical clustering strategy (fine-grained k-means followed by consolidation into K=8 coarse clusters). I do single-pass K-means(K=8) here as a simplification.
+| Aspect | Paris | This Pipeline |
+|--------|-------|---------------|
+| DINOv2 variant | ViT-L/14 (1024-d) | ViT-base (768-d) - compute tradeoff at demo scale |
+| Captioning | Uses existing LAION alt-text | Adds BLIP-2 re-captioning (alt-text is noisy) |
+| Clustering | Two-stage hierarchical K-means | Single-pass K-means(K=8) - simplification |
 
 ## Pipeline
 
@@ -160,24 +162,9 @@ This is how I originally caught leftover shards from run #1 that weren't reflect
 
 Building this pipeline forced me to separate two concerns: the practical mechanics of preparing data for distributed expert training, and the broader research question of whether zero-communication training is a viable paradigm for diffusion models.
 
-### On the Paris Model's Research Claims
+**The efficiency angle is what drew me to this project.** The paper's claims around compute and data efficiency (14x less data, 16x less compute vs. prior decentralized baselines) represent exactly the kind of research I find exciting: rethinking fundamental assumptions about how distributed training has to work. Zero-communication is a bold departure from synchronized approaches like DDP and FSDP, and if the approach holds, it could genuinely democratize large-scale training.
 
-**The ambition is genuine, and the departure from convention is extreme.** The architecture described in the Intro (isolated experts, DINOv2 clustering, DiT backbone, post-hoc router) builds on the broader "Decentralized Diffusion Models" (DDM) paradigm, which aims to democratize diffusion training by eliminating the need for expensive, synchronized GPU clusters. However, the complete elimination of inter-expert communication represents an extreme position even within that paradigm, and raises questions about convergence guarantees and optimal data utilization.
-
-To put the departure in perspective: Google's DiLoCo, currently among the most aggressive approaches to reducing communication overhead in distributed training, achieves roughly a 500x communication reduction and has been adopted by multiple research groups after extensive evaluation. Paris claims to eliminate communication entirely. No major AI company has adopted a similar zero-communication approach for production training. That gap could reflect conservatism and a reluctance to pursue bold departures from established methods, or it could reflect a well-founded understanding that some level of coordination is essential, a position supported by decades of optimization research and current scaling laws, which hold that performance improves predictably when compute and data scale together under properly coordinated training.
-
-**The efficiency claims demand careful scrutiny.** The paper reports ~14.4x less training data and ~16.3x less compute compared to a prior decentralized baseline, while maintaining competitive generation quality. If verified, these would represent a paradigm-shifting advance in training efficiency. Several factors warrant skepticism:
-
-- **Comparison baseline is narrow.** The paper references a "previous decentralized baseline" (DDM) but does not provide comprehensive benchmarks against established methods used in production by major AI labs. The efficiency gains are measured against a single, narrow reference point rather than a broad field of alternatives.
-- **Evaluation scope is limited.** The assessment appears confined to FID scores without broader quality assessments or downstream task performance evaluation. FID alone is an incomplete proxy for generation quality and can mask important failure modes.
-- **Independent validation is absent.** As of February 2026, this remains an arXiv preprint without peer review or independent reproduction. Meta's research teams have not reproduced or validated these results despite their potential significance. This is notable given that both Meta and Google invest heavily in communication-efficient distributed training and would have strong incentive to verify a zero-communication approach if the claims held up.
-- **Tension with established scaling laws.** Scaling laws indicate that data and compute must scale together for optimal performance. A framework claiming dramatic efficiency gains while training experts on isolated data subsets needs to reconcile this tension explicitly, particularly the question of whether partitioned, uncoordinated training can match the sample efficiency of synchronized approaches.
-
-**If communication disappears, clustering becomes the contract.** In practice, the "coordination" shows up entirely in the partitioning step: good clusters create experts with clean specialties; bad clusters strand capacity in the wrong shard, and the router cannot compensate for it after the fact. This is the single point of failure in the architecture, and the one this pipeline gave me direct experience with.
-
-**If validated, the implications are significant.** Paris would fundamentally democratize large-scale diffusion model training by eliminating the need for centralized infrastructure. Academic institutions and smaller organizations could train competitive models using distributed commodity hardware across geographic locations. The zero-communication design could also enable multi-organization collaborations where entities contribute training compute without sharing sensitive data or requiring high-bandwidth interconnects, aligning with growing concerns around data governance and privacy.
-
-That said, Meta's production diffusion models rely on FSDP (Fully Sharded Data Parallelism) and DDP (Distributed Data Parallelism), both of which require frequent synchronization but achieve proven scalability and quality. The broader industry's investment in *reducing* communication rather than *eliminating* it suggests that some coordination between training processes remains essential for optimal convergence. Whether Paris's zero-communication approach can match the quality of synchronized methods at production scale is an open question that rigorous, independent evaluation would need to answer. The natural next step would be an independent reproduction at small scale, benchmarked against the reported FID baselines and at least one synchronized method like DDP.
+**If communication disappears, clustering becomes the contract.** In this architecture, the "coordination" shows up entirely in the partitioning step: good clusters create experts with clean specialties; bad clusters strand capacity in the wrong shard, and the router cannot compensate after the fact. Building this pipeline gave me direct experience with that constraint.
 
 ### Engineering Reality Check (What Actually Broke)
 
@@ -189,7 +176,7 @@ That said, Meta's production diffusion models rely on FSDP (Fully Sharded Data P
 
 **Shard viewer as a debugging tool.** The FastAPI + React viewer (above) started as a quick debugging tool but ended up being the fastest way to audit data quality without writing throwaway scripts. It caught the leftover shard issue and made it easy to spot patterns in the cluster assignments.
 
-Remaining work: close the aesthetic score gaps, validate data cleanliness across all shards, and publish the dataset on Hugging Face.
+**Potential extensions:** close the aesthetic score gaps via LAION's predictor, and publish the cleaned dataset on Hugging Face.
 
 ## Project Structure
 
