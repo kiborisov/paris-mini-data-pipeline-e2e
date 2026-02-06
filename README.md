@@ -174,9 +174,11 @@ Building this pipeline forced me to separate two concerns: the practical mechani
 
 **Leftover shards from previous runs.** After the re-run, I noticed 4 out of 17 total shard files on disk still had zeroed aesthetic scores. These were leftover shards from the first run that still carried the old metadata. They had full data (latents, embeddings, captions), just zeroed aesthetic scores. At the time, the sharding script (`07_shard.py`) didn't clean previous `.tar` outputs before writing new ones, so the 4 leftover files coexisted with the 13 correct shards from run #2. The shard viewer's health checks are what caught this. I fixed this by making Stage 7 clean existing shard outputs by default (`clean_expert_shards: true`). There is also a possibility that some LAION records simply don't have aesthetic scores attached; to close the loop I'd either compute aesthetic scores using LAION's predictor or re-run with stricter metadata validation.
 
-**Shard viewer as a debugging tool.** The FastAPI + React viewer (above) started as a quick debugging tool but ended up being the fastest way to audit data quality without writing throwaway scripts. It caught the leftover shard issue and made it easy to spot patterns in the cluster assignments.
+**Shard viewer as a debugging tool.** The FastAPI + React viewer (above) started as a quick debugging tool but ended up being the fastest way to audit data quality without writing throwaway scripts. It caught the leftover shard issue and made it easy to spot patterns in the cluster assignments. Next step would be closing the aesthetic score gaps via LAION's predictor.
 
-**Potential extensions:** close the aesthetic score gaps via LAION's predictor, and publish the cleaned dataset on Hugging Face.
+### Looking Forward
+
+The zero-communication paradigm that Paris explores has real potential to reshape how we think about distributed diffusion training. If the efficiency claims hold up under broader evaluation (more benchmarks, independent reproductions, comparisons against synchronized baselines), this could be a genuine breakthrough for democratizing large-scale model training. The hard part now is validation. I'd be excited to see more work on rigorous evals and to contribute to that effort.
 
 ## Project Structure
 
