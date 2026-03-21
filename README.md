@@ -178,7 +178,7 @@ Building this pipeline forced me to separate two concerns: the practical mechani
 
 ### Looking Forward
 
-The zero-communication paradigm that Paris explores has real potential to reshape how we think about distributed diffusion training. If the efficiency claims hold up under broader evaluation (more benchmarks, independent reproductions, comparisons against synchronized baselines), this could be a genuine breakthrough for democratizing large-scale model training. The hard part now is validation. I'd be excited to see more work on rigorous evals and to contribute to that effort.
+The zero-communication paradigm that Paris explores has real potential to reshape how we think about distributed diffusion training. If the efficiency claims hold up under broader evaluation (more benchmarks, independent reproductions, comparisons against synchronized baselines), this could be a genuine breakthrough for democratizing large-scale model training. The hard part now is validation.
 
 ## Project Structure
 
